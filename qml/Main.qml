@@ -16,7 +16,7 @@ Window {
     readonly property bool appMode: args.indexOf("--app") >= 0
     // Daemon mode: no file argument on X11 -> stay hidden, pop up at the cursor on Shift + drag.
     // Elsewhere (Wayland, file given) the window is just shown, centred by the compositor.
-    readonly property bool daemon: (Qt.platform.pluginName === "xcb" || Qt.platform.pluginName === "windows") && args.length === 0
+    readonly property bool daemon: !appMode && (Qt.platform.pluginName === "xcb" || Qt.platform.pluginName === "windows") && args.length === 0
                                    && converter.pointer() !== ""
     // The radial menu is fast while dragging; a regular window is easier to understand for normal launches.
     property bool wheelMode: menuMode
