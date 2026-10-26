@@ -36,7 +36,10 @@ The menu adapts to the file you point at. The sectors and lists below are what y
 | **KDE Plasma 6 (Wayland)** | Dolphin right-click → *Convert with Clementine* and global hotkey **Meta+Shift+C** open the radial menu; use `clementine --app` for the workspace | Yes, on Plasma 6.7 |
 | **Linux X11** | Hold **Shift** and drag a file: the menu appears under the cursor and you drop onto it. Run `clementine` with no arguments (background mode). Also `clementine --menu` | Starts and polls the pointer; real drag not yet tested |
 | **Windows 10/11** | Same Shift-drag trigger; Explorer right-click opens the radial menu; the Start-menu shortcut opens the workspace | Code written, **not compiled or run yet** |
-| GNOME and other Wayland | `clementine --app` | Works as a normal window; no desktop integration yet |
+| **GNOME** | Nautilus right-click opens the radial menu; **Super+Shift+C** opens an empty wheel; the app launcher opens the workspace | Needs `nautilus-python`; the wheel is centred on Wayland |
+| **XFCE** | Thunar right-click opens the radial menu; the app launcher opens the workspace | Yes, after installation |
+| **i3 / Sway / Hyprland** | Configurable **Mod+Shift+C** opens a floating radial menu; `--app` remains a normal tiled window | Install the supplied rule |
+| Other Wayland | `clementine --app` | Works as a normal window |
 
 Why not Shift-drag on Wayland: compositors deliberately do not let applications track the pointer or intercept drags globally. On KDE, a small KWin script places the window under the cursor and the hotkey / Dolphin action start it.
 
@@ -73,6 +76,8 @@ sudo pacman -S rust qt6-base qt6-declarative imagemagick ffmpeg poppler ghostscr
 `PREFIX=/usr/local sudo -E ./install.sh` installs system-wide (without the per-user KDE integration).
 
 On KDE the installer also adds the KWin placement script, the Dolphin action and the **Meta+Shift+C** hotkey (change it in *System Settings → Shortcuts → Clementine*). To (re)install only the KDE part: `integration/kde/install.sh [path/to/clementine]`.
+
+On GNOME, `./install.sh` installs the Nautilus action and **Super+Shift+C** shortcut when `nautilus-python` is available. On XFCE it adds a Thunar custom action. For a tiling window manager, append the supplied binding and floating rule with `integration/tiling/install.sh i3|sway|hyprland [path/to/clementine]`, then reload the WM configuration. The wheel is floating; the workspace (`--app`) stays tiled.
 
 ### AppImage (Linux x86_64)
 
