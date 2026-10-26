@@ -33,6 +33,10 @@ mod qobject {
         #[qinvokable]
         fn clipboard_files(self: &Converter) -> QString;
 
+        /// Available external converters as `name=0|1` lines.
+        #[qinvokable]
+        fn available_tools(self: &Converter) -> QString;
+
         /// Global pointer state "x,y,shift,button1", "" when unavailable.
         #[qinvokable]
         fn pointer(self: &Converter) -> QString;
@@ -40,6 +44,13 @@ mod qobject {
         /// Overall progress 0..100, or -1 while the current step has no measurable progress.
         #[qsignal]
         fn progress(self: Pin<&mut Converter>, percent: i32);
+
+        /// File currently being processed, followed by its individual result.
+        #[qsignal]
+        fn current_file(self: Pin<&mut Converter>, file: QString);
+
+        #[qsignal]
+        fn file_finished(self: Pin<&mut Converter>, file: QString, message: QString);
 
         /// Status-line text with a leading "✓ " or "✗ ".
         #[qsignal]
@@ -127,7 +138,10 @@ fn local(p: &str) -> String {
 }
 
 /// The whole job, on the worker thread. `done` counts finished files; `emit` gets progress 0..100 (-1 = unknown).
-fn job(files: &[String], kind: &str, arg: &str, done: &AtomicUsize, emit: &dyn Fn(i32)) -> String {
+fn job(
+    files: &[String], kind: &str, arg: &str, done: &AtomicUsize, emit: &dyn Fn(i32),
+    emit_current: &dyn Fn(&str), emit_result: &dyn Fn(&str, String),
+) -> String {
     let total = files.len();
     let (mut ok, mut last, mut first_err) = (0, Err("no files".to_string()), None);
     for (i, f) in files.iter().enumerate() {
@@ -138,8 +152,10 @@ fn job(files: &[String], kind: &str, arg: &str, done: &AtomicUsize, emit: &dyn F
         }
         done.store(i, Ordering::Relaxed);
         emit(-1);
+        emit_current(f);
         last = if kind == "fmt" { crate::convert::convert(&local(f), arg).map(|o| format!("Saved {o}")) }
                else { crate::convert::act(&local(f), arg) };
+        emit_result(f, mark(&last));
         if last.is_ok() { ok += 1 } else { first_err.get_or_insert(mark(&last)); }
         done.store(i + 1, Ordering::Relaxed);
         emit(((i + 1) * 100 / total) as i32);
@@ -179,7 +195,17 @@ impl qobject::Converter {
             let emit = |p: i32| {
                 let _ = q.queue(move |mut o| o.as_mut().progress(p));
             };
-            let msg = job(&files, &kind, &arg, &done, &emit);
+            let current_q = qt.clone();
+            let emit_current = move |file: &str| {
+                let file = file.to_owned();
+                let _ = current_q.queue(move |mut o| o.as_mut().current_file(QString::from(file.as_str())));
+            };
+            let result_q = qt.clone();
+            let emit_result = move |file: &str, message: String| {
+                let file = file.to_owned();
+                let _ = result_q.queue(move |mut o| o.as_mut().file_finished(QString::from(file.as_str()), QString::from(message.as_str())));
+            };
+            let msg = job(&files, &kind, &arg, &done, &emit, &emit_current, &emit_result);
             crate::convert::set_hook(None);
             busy.store(false, Ordering::SeqCst);
             let _ = qt.queue(move |mut o| o.as_mut().finished(QString::from(msg.as_str())));
@@ -202,6 +228,20 @@ impl qobject::Converter {
 
     fn clipboard_files(&self) -> QString {
         QString::from(crate::convert::clipboard_files().join("\n").as_str())
+    }
+
+    fn available_tools(&self) -> QString {
+        let bins = ["magick", "ffmpeg", "ffprobe", "pdftoppm", "pdftotext", "pdfseparate", "gs", "bsdtar", "soffice", "x2t"];
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let report = bins.iter().map(|bin| {
+            let found = std::env::split_paths(&path).any(|dir| {
+                let plain = dir.join(bin);
+                let exe = dir.join(format!("{bin}.exe"));
+                plain.is_file() || exe.is_file()
+            });
+            format!("{bin}={}", found as u8)
+        }).collect::<Vec<_>>().join("\n");
+        QString::from(report.as_str())
     }
 
     fn pointer(&self) -> QString {
@@ -232,11 +272,11 @@ mod tests {
         let files = vec![a.display().to_string(), b.display().to_string(), d.join("missing.png").display().to_string()];
         let seen = std::cell::RefCell::new(vec![]);
         let done = AtomicUsize::new(0);
-        let msg = job(&files, "fmt", "webp", &done, &|p| seen.borrow_mut().push(p));
+        let msg = job(&files, "fmt", "webp", &done, &|p| seen.borrow_mut().push(p), &|_| {}, &|_, _| {});
         assert!(msg.starts_with("✗ 2 / 3"), "{msg}");
         assert_eq!(seen.borrow().last(), Some(&100));
         assert!(d.join("a.webp").exists() && d.join("b.webp").exists());
-        let one = job(&files[..1], "fmt", "jpg", &done, &|_| {});
+        let one = job(&files[..1], "fmt", "jpg", &done, &|_| {}, &|_| {}, &|_, _| {});
         assert!(one.starts_with("✓ ") && one.ends_with("a.jpg"), "{one}");
         std::fs::remove_dir_all(&d).unwrap();
     }
