@@ -34,7 +34,7 @@ cat > "$desktop" <<DESK
 Type=Application
 Name=Clementine
 Comment=File converter, right where you drag
-Exec=$bin %F
+Exec=$bin --app %F
 Icon=clementine
 Terminal=false
 Categories=Utility;
