@@ -150,7 +150,11 @@ Window {
         "More formats": "Больше форматов", "Fewer formats": "Скрыть форматы", "Other actions": "Другие действия",
         "Results": "Результат", "Ready to convert": "Готово к конвертации", "No files were found in the clipboard": "В буфере обмена нет файлов",
         "Save results": "Сохранять результаты", "Advanced settings": "Дополнительные настройки", "Next to each original file": "Рядом с каждым исходным файлом",
-        "Processing": "Обработка", "Choose files": "Выберите файлы", "Paste": "Вставить"
+        "Processing": "Обработка", "Choose files": "Выберите файлы", "Paste": "Вставить",
+        "Open folder": "Открыть папку", "Copy location": "Копировать путь", "Current file": "Текущий файл",
+        "Queue": "Очередь", "Recent operations": "Недавние операции", "Repeat": "Повторить",
+        "Will be saved to": "Будет сохранён в", "Required tools are missing": "Не хватает нужных программ",
+        "Install": "Установите", "to use this action": "для этого действия", "Remove": "Удалить"
     })
     function t(s) { return ru && ruText[s] !== undefined ? ruText[s] : s }
 
@@ -167,6 +171,12 @@ Window {
     property string status: ""
     property bool busy: false
     property bool showAllFormats: false
+    property bool appendFiles: false
+    property var plannedEntry: null
+    property var queue: []
+    property var history: []
+    property var toolStatus: ({})
+    property string currentFile: ""
     property int clipRows: 4
     property string overlay: ""         // "", "settings" or "trim": a form on top of the wheel
     property string lang: "auto"        // language setting
@@ -188,12 +198,69 @@ Window {
         return Math.floor(((a % 360) + 360) % 360 / segDeg)
     }
 
+    function resultFolder() {
+        var configured = converter.setting("output_dir")
+        if (configured) return configured
+        var slash = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"))
+        return slash >= 0 ? file.slice(0, slash) : "."
+    }
+    function resultUrl(path) { return "file://" + (path.startsWith("/") ? "" : "/") + encodeURI(path) }
+    function openResultFolder() { if (resultFolder()) Qt.openUrlExternally(resultUrl(resultFolder())) }
+    function copyResultFolder() { clipboard.text = resultFolder(); clipboard.selectAll(); clipboard.copy(); status = t("Copied") }
+    function previewFor(entry) {
+        if (!entry || !file) return ""
+        if (entry.kind === "fmt") {
+            var name = file.split(/[\\/]/).pop().replace(/\.[^.]*$/, "." + entry.arg)
+            return resultFolder() + "/" + name
+        }
+        return resultFolder()
+    }
+    function requirementsFor(entry) {
+        if (!entry) return []
+        if (entry.kind === "fmt") {
+            if (kind === "image") return ["magick"]
+            if (kind === "video" || kind === "audio") return ["ffmpeg"]
+            if (kind === "pdf") return entry.arg === "txt" ? ["pdftotext"] : ["pdftoppm"]
+            if (kind === "doc") return ["soffice", "x2t"]
+        }
+        if (entry.arg && (entry.arg.indexOf("resize") === 0 || entry.arg === "pdf")) return ["magick"]
+        if (entry.arg && (entry.arg.indexOf("trim") === 0 || entry.arg.indexOf("clips") === 0 || entry.arg === "audio")) return ["ffmpeg"]
+        if (entry.arg && (entry.arg.indexOf("ar-") === 0 || entry.arg === "archive" || entry.arg === "extract")) return ["bsdtar"]
+        if (entry.arg && entry.arg.indexOf("pdf-") === 0) return ["pdftoppm"]
+        return []
+    }
+    function missingTools(entry) {
+        var required = requirementsFor(entry)
+        if (kind === "doc" && required.length === 2) return required.every(name => toolStatus[name] === false) ? required : []
+        return required.filter(name => toolStatus[name] === false)
+    }
+    function removeFile(index) {
+        if (busy) return
+        files = files.filter((_, i) => i !== index)
+        showAllFormats = false
+    }
+    function updateQueue(path, state, message) {
+        queue = queue.map(item => item.file === path ? ({ file: item.file, state: state, message: message || "" }) : item)
+    }
+    function remember(entry, list) {
+        if (entry.kind === "dialog" || entry.kind === "text") return
+        history = [{ label: entry.label || entry.arg, kind: entry.kind, arg: entry.arg, files: list.slice(), result: "" }].concat(history).slice(0, 4)
+    }
+    function repeat(entry) {
+        if (busy) return
+        files = entry.files.slice()
+        pick({ label: entry.label, kind: entry.kind, arg: entry.arg })
+    }
+
     onHoveredChanged: {
         if (hovered >= 0) { closeTimer.stop(); menuOf = vis[hovered].id }
         else closeTimer.restart()
     }
     onMenuOfChanged: if (menuOf >= 0) { panel.idx = vis.findIndex(v => v.id === menuOf); panel.entries = menuItems(menuOf) }
-    onFilesChanged: if (menuOf >= 0) panel.entries = menuItems(menuOf)
+    onFilesChanged: {
+        if (menuOf >= 0) panel.entries = menuItems(menuOf)
+        plannedEntry = files.length ? (menuItems(0)[0] || menuItems(8)[0]) : null
+    }
     Timer { id: closeTimer; interval: 220; onTriggered: if (!panelHover.hovered) win.menuOf = -1 }
 
     function poll() {
@@ -231,6 +298,13 @@ Window {
     Timer { id: doneTimer; interval: 2000; onTriggered: win.dismiss() }        // action finished
     Component.onCompleted: {
         lang = converter.setting("language")
+        var tools = converter.available_tools().split("\n")
+        var status = ({})
+        for (var i = 0; i < tools.length; i++) {
+            var pair = tools[i].split("=")
+            if (pair.length === 2) status[pair[0]] = pair[1] === "1"
+        }
+        toolStatus = status
         if (menuMode && files.length === 0) files = converter.clipboard_files().split("\n").filter(l => l !== "")
         if (menuMode && (Qt.platform.pluginName === "xcb" || Qt.platform.pluginName === "windows")) {
             var s = converter.pointer().split(","), r = Screen.devicePixelRatio   // Wayland: the KWin script places us
@@ -269,11 +343,16 @@ if (name === "trim") trimStart.input.forceActiveFocus()
         if (busy) return
         if (!e.kind) { status = t("Not implemented yet"); return }
         if (!file) { status = t("Drop a file first"); return }
+        var missing = missingTools(e)
+        if (missing.length) { status = t("Required tools are missing") + ": " + missing.join(", "); return }
         doneTimer.stop()
         if (e.kind === "dialog") { openOverlay(e.arg); return }
         if (e.kind === "text") { clipboard.text = e.arg; clipboard.selectAll(); clipboard.copy(); status = t("Copied"); if (daemon) doneTimer.restart(); return }
         // Copy file takes the whole list as one job
         var list = e.arg === "copy-file" ? [files.join("\n")] : files
+        queue = list.map(f => ({ file: f, state: "queued", message: "" }))
+        currentFile = ""
+        remember(e, list)
         busy = true; percent = -1; status = ""
         converter.run(list.join("\n"), e.kind, e.arg)
     }
@@ -281,8 +360,15 @@ if (name === "trim") trimStart.input.forceActiveFocus()
     Connections {
         target: converter
         function onProgress(p) { win.percent = p }
+        function onCurrentFile(path) { win.currentFile = path; win.updateQueue(path, "running", "") }
+        function onFileFinished(path, message) { win.updateQueue(path, message.indexOf("✓") === 0 ? "done" : "failed", message) }
         function onFinished(message) {
             win.busy = false; win.status = message
+            if (win.history.length) {
+                var newest = win.history[0]
+                newest.result = message
+                win.history = [newest].concat(win.history.slice(1))
+            }
             if (win.daemon) doneTimer.restart()
         }
     }
@@ -292,7 +378,9 @@ if (name === "trim") trimStart.input.forceActiveFocus()
         title: win.t("Choose files")
         fileMode: FileDialog.OpenFiles
         onAccepted: {
-            win.files = selectedFiles.map(win.localPath)
+            var selected = selectedFiles.map(win.localPath)
+            win.files = win.appendFiles ? win.files.concat(selected) : selected
+            win.appendFiles = false
             win.status = ""
         }
     }
@@ -307,6 +395,7 @@ if (name === "trim") trimStart.input.forceActiveFocus()
         property bool primary: false
         property bool compact: false
         signal triggered
+        signal highlighted
         height: compact ? 34 : 42
         implicitWidth: textItem.implicitWidth + (compact ? 24 : 32)
         radius: 9
@@ -329,6 +418,7 @@ if (name === "trim") trimStart.input.forceActiveFocus()
             hoverEnabled: true
             enabled: parent.enabled
             cursorShape: Qt.PointingHandCursor
+            onEntered: parent.highlighted()
             onClicked: { parent.forceActiveFocus(); parent.triggered() }
         }
         Keys.onReturnPressed: triggered()
@@ -394,9 +484,14 @@ if (name === "trim") trimStart.input.forceActiveFocus()
                             Rectangle {
                                 width: parent.width; height: 33; radius: 7; color: "#1c1f26"
                                 Text {
-                                    anchors.left: parent.left; anchors.leftMargin: 10; anchors.right: parent.right; anchors.rightMargin: 10
+                                    anchors.left: parent.left; anchors.leftMargin: 10; anchors.right: removeButton.left; anchors.rightMargin: 6
                                     anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideMiddle
                                     text: win.files[index].split(/[\\/]/).pop(); color: "#e2e5ea"; font.pixelSize: 14
+                                }
+                                AppButton {
+                                    id: removeButton; anchors.right: parent.right; anchors.rightMargin: 3; anchors.verticalCenter: parent.verticalCenter
+                                    label: "×"; compact: true; width: 28; height: 27; enabled: !win.busy
+                                    onTriggered: win.removeFile(index)
                                 }
                             }
                         }
@@ -405,25 +500,58 @@ if (name === "trim") trimStart.input.forceActiveFocus()
                             color: "#aeb3bd"; font.pixelSize: 13
                         }
                     }
-                    MouseArea { id: sourceMouse; anchors.fill: parent; hoverEnabled: true; onClicked: fileDialog.open() }
+                    MouseArea { id: sourceMouse; anchors.fill: parent; hoverEnabled: true; visible: win.files.length === 0; onClicked: { win.appendFiles = false; fileDialog.open() } }
                 }
 
                 Row {
                     x: 20; y: sourceCard.y + sourceCard.height + 16; width: parent.width - 40; spacing: 8
-                    AppButton { label: win.t("Add files"); primary: true; width: parent.width * 0.58; onTriggered: fileDialog.open() }
+                    AppButton { label: win.t("Add files"); primary: true; width: parent.width * 0.48; onTriggered: { win.appendFiles = win.files.length > 0; fileDialog.open() } }
                     AppButton {
-                        label: "⌘ " + win.t("Paste"); width: parent.width - x - width; enabled: !win.busy
+                        label: "⌘ " + win.t("Paste"); width: parent.width * 0.30; enabled: !win.busy
                         onTriggered: {
                             var fromClipboard = converter.clipboard_files().split("\n").filter(l => l !== "")
                             win.files = fromClipboard
                             win.status = fromClipboard.length ? "" : win.t("No files were found in the clipboard")
                         }
                     }
+                    AppButton {
+                        visible: win.files.length > 0; label: "×"; width: parent.width - x - width; enabled: !win.busy
+                        onTriggered: { win.files = []; win.status = ""; win.showAllFormats = false }
+                    }
                 }
-                AppButton {
-                    visible: win.files.length > 0; x: 20; y: parent.height - height - 20; width: parent.width - 40
-                    label: win.t("Clear"); compact: true; enabled: !win.busy
-                    onTriggered: { win.files = []; win.status = ""; win.showAllFormats = false }
+                Item {
+                    visible: (win.busy && win.queue.length) || (!win.busy && win.history.length)
+                    x: 20; y: sourceCard.y + sourceCard.height + 68; width: parent.width - 40; height: parent.height - y - 12
+                    Text {
+                        text: win.t(win.busy ? "Queue" : "Recent operations")
+                        color: "#c9ced8"; font.pixelSize: 13; font.weight: Font.DemiBold
+                    }
+                    Column {
+                        y: 24; width: parent.width; spacing: 5
+                        Repeater {
+                            model: win.busy ? win.queue.slice(0, 3) : win.history.slice(0, 3)
+                            Rectangle {
+                                width: parent.width; height: 29; radius: 6; color: "#1c1f26"
+                                readonly property bool queueRow: win.busy
+                                Text {
+                                    x: 8; anchors.verticalCenter: parent.verticalCenter; width: parent.width - (queueRow ? 16 : 62)
+                                    elide: Text.ElideMiddle; font.pixelSize: 12
+                                    text: queueRow ? modelData.file.split(/[\\/]/).pop() : modelData.label
+                                    color: queueRow && modelData.state === "failed" ? "#ff9c91" : "#d9dde4"
+                                }
+                                Text {
+                                    visible: queueRow; anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.state === "running" ? "…" : (modelData.state === "done" ? "✓" : (modelData.state === "failed" ? "!" : "○"))
+                                    color: modelData.state === "failed" ? "#ff9c91" : "#e9a45e"; font.pixelSize: 14
+                                }
+                                AppButton {
+                                    visible: !queueRow; anchors.right: parent.right; anchors.rightMargin: 3; anchors.verticalCenter: parent.verticalCenter
+                                    label: win.t("Repeat"); compact: true; width: 54; height: 25
+                                    onTriggered: win.repeat(modelData)
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -446,6 +574,7 @@ if (name === "trim") trimStart.input.forceActiveFocus()
                             model: win.showAllFormats ? win.menuItems(0) : win.menuItems(0).slice(0, 5)
                             AppButton {
                                 label: win.t(modelData.label); enabled: !!modelData.kind && !win.busy
+                                onHighlighted: win.plannedEntry = modelData
                                 onTriggered: win.pick(modelData)
                             }
                         }
@@ -463,12 +592,26 @@ if (name === "trim") trimStart.input.forceActiveFocus()
                             model: win.menuItems(8).slice(0, 4)
                             AppButton {
                                 label: win.t(modelData.label); compact: true; enabled: !win.busy
+                                onHighlighted: win.plannedEntry = modelData
                                 onTriggered: win.pick(modelData)
                             }
                         }
                     }
                 }
 
+                Text {
+                    visible: !!win.plannedEntry && win.files.length > 0
+                    x: 24; y: parent.height - 174; width: parent.width - 48; elide: Text.ElideMiddle
+                    text: win.t("Will be saved to") + ": " + win.previewFor(win.plannedEntry)
+                    color: "#9fa5b0"; font.pixelSize: 13
+                }
+                Text {
+                    readonly property var missing: win.missingTools(win.plannedEntry)
+                    visible: missing.length > 0
+                    x: 24; y: parent.height - 154; width: parent.width - 48; elide: Text.ElideMiddle
+                    text: win.t("Required tools are missing") + ": " + missing.join(", ")
+                    color: "#ffb0a7"; font.pixelSize: 13
+                }
                 Rectangle {
                     x: 24; y: parent.height - 96; width: parent.width - 48; height: 72; radius: 10
                     color: win.busy ? "#292d37" : "#1c1f26"; border.color: "#363b46"
@@ -483,12 +626,18 @@ if (name === "trim") trimStart.input.forceActiveFocus()
                     }
                     Text { visible: win.busy && win.percent >= 0; anchors.right: cancelButton.left; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; text: win.percent + "%"; color: "#dce0e6"; font.pixelSize: 14 }
                     AppButton { id: cancelButton; visible: win.busy; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; label: win.t("Cancel"); compact: true; onTriggered: converter.cancel() }
+                    AppButton { visible: !win.busy && win.status.indexOf("✓") === 0; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; label: win.t("Open folder"); compact: true; onTriggered: win.openResultFolder() }
                 }
                 AppButton {
                     x: 24; y: parent.height - 138; label: win.t("Advanced settings"); compact: true; enabled: !win.busy
                     onTriggered: win.openOverlay("settings")
                 }
                 Text { x: 176; y: parent.height - 128; text: win.t("Save results") + ": " + (converter.setting("output_dir") || win.t("Next to each original file")); color: "#9fa5b0"; font.pixelSize: 13; elide: Text.ElideMiddle; width: parent.width - 200 }
+                AppButton {
+                    visible: !win.busy && win.status.indexOf("✓") === 0
+                    x: 24; y: parent.height - 180; label: win.t("Copy location"); compact: true
+                    onTriggered: win.copyResultFolder()
+                }
             }
         }
     }
