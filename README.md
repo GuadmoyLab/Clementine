@@ -33,10 +33,10 @@ The menu adapts to the file you point at. The sectors and lists below are what y
 
 | Platform | How the menu starts | Tested |
 |---|---|---|
-| **KDE Plasma 6 (Wayland)** | Dolphin right-click → *Convert with Clementine*; global hotkey **Meta+Shift+C** (uses files copied in Dolphin, or opens empty to drop a file on); `clementine <files>` | Yes, on Plasma 6.7 |
+| **KDE Plasma 6 (Wayland)** | Dolphin right-click → *Convert with Clementine* and global hotkey **Meta+Shift+C** open the radial menu; use `clementine --app` for the workspace | Yes, on Plasma 6.7 |
 | **Linux X11** | Hold **Shift** and drag a file: the menu appears under the cursor and you drop onto it. Run `clementine` with no arguments (background mode). Also `clementine --menu` | Starts and polls the pointer; real drag not yet tested |
-| **Windows 10/11** | Same Shift-drag trigger; Explorer right-click action | Code written, **not compiled or run yet** |
-| GNOME and other Wayland | `clementine <files>` only | Works as a normal window; no desktop integration yet |
+| **Windows 10/11** | Same Shift-drag trigger; Explorer right-click opens the radial menu; the Start-menu shortcut opens the workspace | Code written, **not compiled or run yet** |
+| GNOME and other Wayland | `clementine --app` | Works as a normal window; no desktop integration yet |
 
 Why not Shift-drag on Wayland: compositors deliberately do not let applications track the pointer or intercept drags globally. On KDE, a small KWin script places the window under the cursor and the hotkey / Dolphin action start it.
 
