@@ -14,16 +14,17 @@ Window {
     readonly property var args: Qt.application.arguments.slice(1)
     readonly property bool menuMode: args.indexOf("--menu") >= 0
     readonly property bool appMode: args.indexOf("--app") >= 0
+    readonly property bool residentMode: args.indexOf("--daemon") >= 0
     // Daemon mode: no file argument on X11 -> stay hidden, pop up at the cursor on Shift + drag.
     // Elsewhere (Wayland, file given) the window is just shown, centred by the compositor.
-    readonly property bool daemon: !appMode && (Qt.platform.pluginName === "xcb" || Qt.platform.pluginName === "windows") && args.length === 0
-                                   && converter.pointer() !== ""
+    readonly property bool daemon: residentMode || (!appMode && (Qt.platform.pluginName === "xcb" || Qt.platform.pluginName === "windows") && args.length === 0
+                                   && converter.pointer() !== "")
     // The radial menu is fast while dragging; a regular window is easier to understand for normal launches.
     property bool wheelMode: menuMode
     readonly property bool standardMode: !daemon && !wheelMode
     visible: !daemon
     color: standardMode ? "#16181e" : "transparent"
-    flags: standardMode ? Qt.Window : Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | (daemon ? Qt.Tool | (overlay === "" ? Qt.WindowDoesNotAcceptFocus : 0) : 0)
+    flags: standardMode ? Qt.Window : Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | (daemon ? Qt.Tool | (overlay === "" && !ipcShown ? Qt.WindowDoesNotAcceptFocus : 0) : 0)
     title: "Clementine"
 
     readonly property real cx: standardMode ? width / 2 : 540   // radial-menu values match integration/kde/kwin-script
@@ -166,7 +167,7 @@ Window {
     }
 
     // every selected file gets the action; `file` (the first) drives the menu contents
-    property var files: args.filter(a => a !== "--menu" && a !== "--app")
+    property var files: args.filter(a => a !== "--menu" && a !== "--app" && a !== "--daemon")
     readonly property string file: files.length > 0 ? files[0] : ""
     property int hovered: -1
     property int menuOf: -1          // which sector's list is shown; kept while the pointer travels to it
@@ -185,6 +186,7 @@ Window {
     property int percent: -1            // -1 = running, progress unknown
     property bool open: false
     property bool dragShown: false      // popped up by a drag that has not been released yet
+    property bool ipcShown: false       // request from the resident process: needs keyboard focus
     property bool pressing: false
     property bool needRelease: false    // after dismiss, ignore the still-held button
     property real px0: 0
@@ -266,6 +268,15 @@ Window {
     Timer { id: closeTimer; interval: 220; onTriggered: if (!panelHover.hovered) win.menuOf = -1 }
 
     function poll() {
+        var request = converter.take_menu_request()
+        if (request !== "") {
+            files = request.slice(1).split("\n").filter(path => path !== "")
+            if (files.length === 0) files = converter.clipboard_files().split("\n").filter(path => path !== "")
+            status = ""; menuOf = -1; hovered = -1
+            ipcShown = true; dragShown = false; pressing = false
+            open = false; visible = true; openTimer.restart(); requestActivate()
+            return
+        }
         var s = converter.pointer().split(",").map(Number)
         var down = s[2] === 1 && s[3] === 1
         if (visible) {
@@ -291,6 +302,7 @@ Window {
         if (!daemon) { Qt.quit(); return }
         open = false; visible = false
         files = []; status = ""; menuOf = -1; hovered = -1
+        ipcShown = false
         hideTimer.stop(); doneTimer.stop()
         needRelease = true
     }
