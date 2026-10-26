@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs Clementine for the current user (PREFIX=~/.local by default).
-#   ./install.sh              build if needed, install, add KDE integration when running KDE
+#   ./install.sh              build if needed, install, add desktop integration when available
 #   ./install.sh --uninstall  remove everything this script installed
 #   PREFIX=/usr/local sudo -E ./install.sh   system-wide (no KDE integration; that is per-user)
 set -e
@@ -50,6 +50,8 @@ command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$
 
 case "$XDG_CURRENT_DESKTOP" in
     *KDE*) [ "$PREFIX" = "$HOME/.local" ] && integration/kde/install.sh "$bin" ;;
+    *GNOME*) [ "$PREFIX" = "$HOME/.local" ] && integration/gnome/install.sh "$bin" ;;
+    *XFCE*) [ "$PREFIX" = "$HOME/.local" ] && integration/xfce/install.sh "$bin" ;;
 esac
 
 if [ "$PREFIX" = "$HOME/.local" ] && command -v kbuildsycoca6 >/dev/null 2>&1; then
