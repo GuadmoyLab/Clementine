@@ -1,11 +1,15 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Shapes
+import QtQuick.Dialogs
 import clementine
 
 Window {
     id: win
-    width: 1080; height: 640   // wide enough for the list on either side of the wheel
+    width: standardMode ? 1000 : 1080
+    height: standardMode ? 720 : 640
+    minimumWidth: standardMode ? 760 : 1080
+    minimumHeight: standardMode ? 560 : 640
     // `--menu` (global hotkey): show right away at the cursor; with no file arguments use the clipboard's files
     readonly property var args: Qt.application.arguments.slice(1)
     readonly property bool menuMode: args.indexOf("--menu") >= 0
@@ -13,13 +17,15 @@ Window {
     // Elsewhere (Wayland, file given) the window is just shown, centred by the compositor.
     readonly property bool daemon: (Qt.platform.pluginName === "xcb" || Qt.platform.pluginName === "windows") && args.length === 0
                                    && converter.pointer() !== ""
+    // The radial menu is fast while dragging; a regular window is easier to understand for normal launches.
+    readonly property bool standardMode: !daemon && !menuMode
     visible: !daemon
-    color: "transparent"
-    flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | (daemon ? Qt.Tool | (overlay === "" ? Qt.WindowDoesNotAcceptFocus : 0) : 0)
+    color: standardMode ? "#16181e" : "transparent"
+    flags: standardMode ? Qt.Window : Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | (daemon ? Qt.Tool | (overlay === "" ? Qt.WindowDoesNotAcceptFocus : 0) : 0)
     title: "Clementine"
 
-    readonly property real cx: 540   // keep in sync with WHEEL_X/Y in integration/kde/kwin-script
-    readonly property real cy: 320
+    readonly property real cx: standardMode ? width / 2 : 540   // radial-menu values match integration/kde/kwin-script
+    readonly property real cy: standardMode ? height / 2 : 320
     readonly property real rIn: 108
     readonly property real rOut: 252
     readonly property color accent: "#e08a35"
@@ -82,6 +88,7 @@ Window {
             if (k === "pdf") return pdfToOther
             if (k === "doc") return fmts(docFormats())
             if (k === "archive") return arActions
+            if (k === "other") return []
             return fmts(imgFormats)
         }
         if (id === 1) return [{ label: "Copy file", kind: "act", arg: "copy-file" },
@@ -136,9 +143,21 @@ Window {
         "Merge PDFs": "Объединить PDF", "Compress": "Сжать", "To Word (DOCX)": "В Word (DOCX)",
         "To Text (TXT)": "В текст (TXT)", "MP3 (audio)": "MP3 (аудио)", "Extract here": "Распаковать здесь",
         "To PDF": "В PDF", "files": "файлов", "Drop a file": "Перетащите файл", "Drop a file first": "Сначала перетащите файл",
-        "Not implemented yet": "Пока не реализовано", "Copied": "Скопировано"
+        "Not implemented yet": "Пока не реализовано", "Copied": "Скопировано",
+        "Your files": "Ваши файлы", "Add files": "Добавить файлы", "Paste from clipboard": "Вставить из буфера",
+        "Clear": "Очистить", "Drop files here": "Перетащите файлы сюда", "or choose them with the button": "или выберите кнопкой",
+        "Choose an action": "Выберите действие", "Pick a file first": "Сначала добавьте файл", "Convert to": "Конвертировать в",
+        "More formats": "Больше форматов", "Fewer formats": "Скрыть форматы", "Other actions": "Другие действия",
+        "Results": "Результат", "Ready to convert": "Готово к конвертации", "No files were found in the clipboard": "В буфере обмена нет файлов",
+        "Save results": "Сохранять результаты", "Advanced settings": "Дополнительные настройки", "Next to each original file": "Рядом с каждым исходным файлом",
+        "Processing": "Обработка", "Choose files": "Выберите файлы", "Paste": "Вставить"
     })
     function t(s) { return ru && ruText[s] !== undefined ? ruText[s] : s }
+
+    function localPath(url) {
+        var path = decodeURIComponent(url.toString().replace(/^file:\/\//, ""))
+        return Qt.platform.os === "windows" && /^\/[A-Za-z]:/.test(path) ? path.slice(1) : path
+    }
 
     // every selected file gets the action; `file` (the first) drives the menu contents
     property var files: args.filter(a => a !== "--menu")
@@ -147,6 +166,7 @@ Window {
     property int menuOf: -1          // which sector's list is shown; kept while the pointer travels to it
     property string status: ""
     property bool busy: false
+    property bool showAllFormats: false
     property int clipRows: 4
     property string overlay: ""         // "", "settings" or "trim": a form on top of the wheel
     property string lang: "auto"        // language setting
@@ -267,14 +287,216 @@ if (name === "trim") trimStart.input.forceActiveFocus()
         }
     }
 
+    FileDialog {
+        id: fileDialog
+        title: win.t("Choose files")
+        fileMode: FileDialog.OpenFiles
+        onAccepted: {
+            win.files = selectedFiles.map(win.localPath)
+            win.status = ""
+        }
+    }
+
     DropArea {
         anchors.fill: parent
-        onDropped: (d) => { if (d.hasUrls) { win.files = d.urls.map(u => decodeURIComponent(u.toString())); win.status = ""; hideTimer.stop() } }
+        onDropped: (d) => { if (d.hasUrls) { win.files = d.urls.map(win.localPath); win.status = ""; hideTimer.stop() } }
+    }
+
+    component AppButton: Rectangle {
+        property string label: ""
+        property bool primary: false
+        property bool compact: false
+        signal triggered
+        height: compact ? 34 : 42
+        implicitWidth: textItem.implicitWidth + (compact ? 24 : 32)
+        radius: 9
+        color: !enabled ? "#252831" : (primary ? "#e08a35" : (hit.containsMouse ? "#363a45" : "#282b34"))
+        border.width: activeFocus ? 2 : 1
+        border.color: activeFocus ? "#f3b46f" : (primary ? "#e08a35" : "#454a57")
+        activeFocusOnTab: enabled
+        Behavior on color { ColorAnimation { duration: 120 } }
+        Text {
+            id: textItem
+            anchors.centerIn: parent
+            text: parent.label
+            color: parent.enabled ? "#f5f6f8" : "#858994"
+            font.pixelSize: parent.compact ? 14 : 15
+            font.weight: parent.primary ? Font.DemiBold : Font.Normal
+        }
+        MouseArea {
+            id: hit
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: parent.enabled
+            cursorShape: Qt.PointingHandCursor
+            onClicked: { parent.forceActiveFocus(); parent.triggered() }
+        }
+        Keys.onReturnPressed: triggered()
+        Keys.onSpacePressed: triggered()
+    }
+
+    Item {
+        id: workspace
+        anchors.fill: parent
+        anchors.margins: 28
+        visible: win.standardMode
+
+        Item {
+            id: header
+            width: parent.width; height: 52
+            Text { text: "Clementine"; color: "#f7f7f8"; font.pixelSize: 27; font.weight: Font.DemiBold }
+            Text { anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: 34
+                   text: win.t("File conversion without the fuss"); color: "#aeb3bd"; font.pixelSize: 14 }
+            AppButton {
+                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                label: "⚙  " + win.t("Settings"); compact: true
+                onTriggered: win.openOverlay("settings")
+            }
+        }
+
+        Row {
+            anchors.top: header.bottom; anchors.topMargin: 24
+            width: parent.width; height: parent.height - header.height - 24
+            spacing: 20
+
+            Rectangle {
+                width: Math.min(330, parent.width * 0.36); height: parent.height; radius: 14
+                color: "#20232b"; border.color: "#343945"
+                Text { x: 20; y: 20; text: win.t("Your files"); color: "#f4f5f7"; font.pixelSize: 18; font.weight: Font.DemiBold }
+                Text {
+                    x: 20; y: 48; width: parent.width - 40
+                    text: win.files.length === 0 ? win.t("Drop files here") : win.files.length + " " + win.t("files")
+                    color: "#aeb3bd"; font.pixelSize: 14
+                }
+
+                Rectangle {
+                    id: sourceCard
+                    x: 20; y: 82; width: parent.width - 40; height: Math.min(250, parent.height - 196); radius: 11
+                    color: sourceMouse.containsMouse ? "#292d37" : "#252832"
+                    border.width: 1; border.color: sourceMouse.containsMouse ? "#e08a35" : "#414756"
+                    Behavior on border.color { ColorAnimation { duration: 120 } }
+                    Text {
+                        visible: win.files.length === 0
+                        anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; anchors.verticalCenterOffset: -12
+                        text: "＋"; color: "#e9a45e"; font.pixelSize: 34
+                    }
+                    Text {
+                        visible: win.files.length === 0
+                        anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; anchors.verticalCenterOffset: 28
+                        text: win.t("Drop files here") + "\n" + win.t("or choose them with the button")
+                        horizontalAlignment: Text.AlignHCenter; color: "#b9bec8"; font.pixelSize: 14; lineHeight: 1.35
+                    }
+                    Column {
+                        visible: win.files.length > 0
+                        x: 14; y: 14; width: parent.width - 28; spacing: 8
+                        Repeater {
+                            model: Math.min(win.files.length, 5)
+                            Rectangle {
+                                width: parent.width; height: 33; radius: 7; color: "#1c1f26"
+                                Text {
+                                    anchors.left: parent.left; anchors.leftMargin: 10; anchors.right: parent.right; anchors.rightMargin: 10
+                                    anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideMiddle
+                                    text: win.files[index].split(/[\\/]/).pop(); color: "#e2e5ea"; font.pixelSize: 14
+                                }
+                            }
+                        }
+                        Text {
+                            visible: win.files.length > 5; text: "+" + (win.files.length - 5) + " " + win.t("files")
+                            color: "#aeb3bd"; font.pixelSize: 13
+                        }
+                    }
+                    MouseArea { id: sourceMouse; anchors.fill: parent; hoverEnabled: true; onClicked: fileDialog.open() }
+                }
+
+                Row {
+                    x: 20; y: sourceCard.y + sourceCard.height + 16; width: parent.width - 40; spacing: 8
+                    AppButton { label: win.t("Add files"); primary: true; width: parent.width * 0.58; onTriggered: fileDialog.open() }
+                    AppButton {
+                        label: "⌘ " + win.t("Paste"); width: parent.width - x - width; enabled: !win.busy
+                        onTriggered: {
+                            var fromClipboard = converter.clipboard_files().split("\n").filter(l => l !== "")
+                            win.files = fromClipboard
+                            win.status = fromClipboard.length ? "" : win.t("No files were found in the clipboard")
+                        }
+                    }
+                }
+                AppButton {
+                    visible: win.files.length > 0; x: 20; y: parent.height - height - 20; width: parent.width - 40
+                    label: win.t("Clear"); compact: true; enabled: !win.busy
+                    onTriggered: { win.files = []; win.status = ""; win.showAllFormats = false }
+                }
+            }
+
+            Rectangle {
+                width: parent.width - x; height: parent.height; radius: 14
+                color: "#20232b"; border.color: "#343945"
+                Text { x: 24; y: 20; text: win.t("Choose an action"); color: "#f4f5f7"; font.pixelSize: 20; font.weight: Font.DemiBold }
+                Text {
+                    x: 24; y: 50; width: parent.width - 48
+                    text: win.files.length === 0 ? win.t("Pick a file first") : win.t("Convert to") + " " + (win.files.length > 1 ? win.files.length + " " + win.t("files") : win.file.split(/[\\/]/).pop())
+                    color: "#aeb3bd"; elide: Text.ElideMiddle; font.pixelSize: 14
+                }
+
+                Item {
+                    visible: win.files.length > 0; x: 24; y: 92; width: parent.width - 48; height: parent.height - 206
+                    Text { text: win.t("Convert to"); color: "#dce0e6"; font.pixelSize: 15; font.weight: Font.DemiBold }
+                    Flow {
+                        x: 0; y: 30; width: parent.width; spacing: 8
+                        Repeater {
+                            model: win.showAllFormats ? win.menuItems(0) : win.menuItems(0).slice(0, 5)
+                            AppButton {
+                                label: win.t(modelData.label); enabled: !!modelData.kind && !win.busy
+                                onTriggered: win.pick(modelData)
+                            }
+                        }
+                        AppButton {
+                            visible: win.menuItems(0).length > 5; compact: true
+                            label: win.t(win.showAllFormats ? "Fewer formats" : "More formats")
+                            enabled: !win.busy
+                            onTriggered: win.showAllFormats = !win.showAllFormats
+                        }
+                    }
+                    Text { y: win.showAllFormats ? 136 : 92; text: win.t("Other actions"); color: "#dce0e6"; font.pixelSize: 15; font.weight: Font.DemiBold }
+                    Flow {
+                        y: win.showAllFormats ? 166 : 122; width: parent.width; spacing: 8
+                        Repeater {
+                            model: win.menuItems(8).slice(0, 4)
+                            AppButton {
+                                label: win.t(modelData.label); compact: true; enabled: !win.busy
+                                onTriggered: win.pick(modelData)
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    x: 24; y: parent.height - 96; width: parent.width - 48; height: 72; radius: 10
+                    color: win.busy ? "#292d37" : "#1c1f26"; border.color: "#363b46"
+                    Text {
+                        x: 14; y: 12; width: parent.width - 150; elide: Text.ElideMiddle
+                        text: win.busy ? win.t("Processing") : (win.status || win.t("Ready to convert"))
+                        color: win.status.indexOf("✗") === 0 ? "#ff9c91" : "#e0e4ea"; font.pixelSize: 14
+                    }
+                    Rectangle {
+                        visible: win.busy; x: 14; y: 43; width: parent.width - 122; height: 7; radius: 4; color: "#3b404c"; clip: true
+                        Rectangle { height: parent.height; radius: parent.radius; color: "#e08a35"; width: win.percent < 0 ? parent.width * 0.35 : parent.width * win.percent / 100 }
+                    }
+                    Text { visible: win.busy && win.percent >= 0; anchors.right: cancelButton.left; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; text: win.percent + "%"; color: "#dce0e6"; font.pixelSize: 14 }
+                    AppButton { id: cancelButton; visible: win.busy; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; label: win.t("Cancel"); compact: true; onTriggered: converter.cancel() }
+                }
+                AppButton {
+                    x: 24; y: parent.height - 138; label: win.t("Advanced settings"); compact: true; enabled: !win.busy
+                    onTriggered: win.openOverlay("settings")
+                }
+                Text { x: 176; y: parent.height - 128; text: win.t("Save results") + ": " + (converter.setting("output_dir") || win.t("Next to each original file")); color: "#9fa5b0"; font.pixelSize: 13; elide: Text.ElideMiddle; width: parent.width - 200 }
+            }
+        }
     }
 
     // wheel: opens with a springy zoom
     Item {
         id: wheel
+        visible: !win.standardMode
         x: 0; y: 0; width: win.width; height: win.height
         transformOrigin: Item.Center
         scale: win.open ? 1 : 0.5; opacity: win.open ? 1 : 0
@@ -378,7 +600,7 @@ if (name === "trim") trimStart.input.forceActiveFocus()
         width: 230; height: col.height + 20; radius: 14
         color: "#f0181a20"; border.color: "#33ffffff"
         opacity: shown ? 1 : 0
-        visible: opacity > 0
+        visible: !win.standardMode && opacity > 0
         Behavior on opacity { NumberAnimation { duration: 160 } }
         Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
         Behavior on y { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
@@ -402,6 +624,7 @@ if (name === "trim") trimStart.input.forceActiveFocus()
     }
 
     Item {   // progress bar while a job runs, result text afterwards
+        visible: !win.standardMode
         x: win.cx - 280; y: win.cy + win.rOut + 14; width: 560; height: 40
         Rectangle {
             id: bar
@@ -438,7 +661,7 @@ if (name === "trim") trimStart.input.forceActiveFocus()
 
     // ---- gear: opens the settings form
     Rectangle {
-        visible: !win.busy && win.overlay === ""
+        visible: !win.standardMode && !win.busy && win.overlay === ""
         x: win.cx + 205 - width / 2; y: win.cy + 205 - height / 2; width: 34; height: 34; radius: 17
         color: gear.containsMouse ? win.accent : "#cc14161b"; border.color: "#44ffffff"
         opacity: win.open ? 1 : 0
