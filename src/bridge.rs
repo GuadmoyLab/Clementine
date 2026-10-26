@@ -41,6 +41,10 @@ mod qobject {
         #[qinvokable]
         fn pointer(self: &Converter) -> QString;
 
+        /// One queued wheel request from the resident background process.
+        #[qinvokable]
+        fn take_menu_request(self: &Converter) -> QString;
+
         /// Overall progress 0..100, or -1 while the current step has no measurable progress.
         #[qsignal]
         fn progress(self: Pin<&mut Converter>, percent: i32);
@@ -246,6 +250,10 @@ impl qobject::Converter {
 
     fn pointer(&self) -> QString {
         QString::from(crate::trigger::pointer().unwrap_or_default().as_str())
+    }
+
+    fn take_menu_request(&self) -> QString {
+        QString::from(crate::take_menu_request().as_str())
     }
 }
 
