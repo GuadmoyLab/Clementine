@@ -1,0 +1,9 @@
+# Build artifacts and downloaded packaging tools
+/target/
+/dist/
+/packaging/appimage/.tools/
+
+# Local IDE and QML language-server settings
+/.idea/
+/*.iml
+/.qmlls.ini

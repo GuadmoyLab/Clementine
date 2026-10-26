@@ -1,0 +1,22 @@
+[package]
+name = "clementine"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+cxx = "1.0.205"
+cxx-qt = "0.10.0"
+cxx-qt-lib = { version = "0.10.0", features = ["full", "qt_qml"] }
+serde = { version = "1.0.229", features = ["derive"] }
+sha2 = "0.11.1"
+toml = "1.1.8"
+
+[build-dependencies]
+cxx-qt-build = "0.10.0"
+
+[target.'cfg(unix)'.dependencies]
+x11rb = "0.14.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
