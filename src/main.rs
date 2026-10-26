@@ -56,6 +56,8 @@ fn start_menu_server() -> bool {
     std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             let mut files = String::new();
+            // a client that connects and never closes must not block later requests
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
             if stream.read_to_string(&mut files).is_ok() {
                 if let Ok(mut request) = pending_menu().lock() {
                     *request = Some(format!("!{files}"));
