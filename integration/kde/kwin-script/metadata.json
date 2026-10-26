@@ -1,0 +1,13 @@
+{
+    "KPlugin": {
+        "Id": "clementine-placer",
+        "Name": "Clementine menu placement",
+        "Description": "Opens the Clementine radial menu centred under the cursor",
+        "Authors": [{ "Name": "Clementine" }],
+        "License": "MIT",
+        "Version": "0.1"
+    },
+    "KPackageStructure": "KWin/Script",
+    "X-Plasma-API": "javascript",
+    "X-Plasma-MainScript": "code/main.js"
+}

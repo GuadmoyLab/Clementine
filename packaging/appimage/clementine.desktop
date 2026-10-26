@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Clementine
+Comment=File converter, right where you drag
+Exec=clementine %F
+Icon=clementine
+Terminal=false
+Categories=Utility;

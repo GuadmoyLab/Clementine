@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+MimeType=all/allfiles;
+Actions=convert;
+X-KDE-Priority=TopLevel
+
+[Desktop Action convert]
+Name=Convert with Clementine
+Icon=view-refresh
+Exec=@BIN@ %F
