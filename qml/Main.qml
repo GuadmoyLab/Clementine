@@ -10,15 +10,17 @@ Window {
     height: standardMode ? 720 : 640
     minimumWidth: standardMode ? 760 : 1080
     minimumHeight: standardMode ? 560 : 640
-    // `--menu` (global hotkey): show right away at the cursor; with no file arguments use the clipboard's files
+    // `--menu` is the radial quick-action mode; `--app` always opens the regular workspace.
     readonly property var args: Qt.application.arguments.slice(1)
     readonly property bool menuMode: args.indexOf("--menu") >= 0
+    readonly property bool appMode: args.indexOf("--app") >= 0
     // Daemon mode: no file argument on X11 -> stay hidden, pop up at the cursor on Shift + drag.
     // Elsewhere (Wayland, file given) the window is just shown, centred by the compositor.
     readonly property bool daemon: (Qt.platform.pluginName === "xcb" || Qt.platform.pluginName === "windows") && args.length === 0
                                    && converter.pointer() !== ""
     // The radial menu is fast while dragging; a regular window is easier to understand for normal launches.
-    readonly property bool standardMode: !daemon && !menuMode
+    property bool wheelMode: menuMode
+    readonly property bool standardMode: !daemon && !wheelMode
     visible: !daemon
     color: standardMode ? "#16181e" : "transparent"
     flags: standardMode ? Qt.Window : Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | (daemon ? Qt.Tool | (overlay === "" ? Qt.WindowDoesNotAcceptFocus : 0) : 0)
@@ -150,7 +152,7 @@ Window {
         "More formats": "Больше форматов", "Fewer formats": "Скрыть форматы", "Other actions": "Другие действия",
         "Results": "Результат", "Ready to convert": "Готово к конвертации", "No files were found in the clipboard": "В буфере обмена нет файлов",
         "Save results": "Сохранять результаты", "Advanced settings": "Дополнительные настройки", "Next to each original file": "Рядом с каждым исходным файлом",
-        "Processing": "Обработка", "Choose files": "Выберите файлы", "Paste": "Вставить",
+        "Processing": "Обработка", "Choose files": "Выберите файлы", "Paste": "Вставить", "Quick wheel": "Быстрое колесо",
         "Open folder": "Открыть папку", "Copy location": "Копировать путь", "Current file": "Текущий файл",
         "Queue": "Очередь", "Recent operations": "Недавние операции", "Repeat": "Повторить",
         "Will be saved to": "Будет сохранён в", "Required tools are missing": "Не хватает нужных программ",
@@ -164,7 +166,7 @@ Window {
     }
 
     // every selected file gets the action; `file` (the first) drives the menu contents
-    property var files: args.filter(a => a !== "--menu")
+    property var files: args.filter(a => a !== "--menu" && a !== "--app")
     readonly property string file: files.length > 0 ? files[0] : ""
     property int hovered: -1
     property int menuOf: -1          // which sector's list is shown; kept while the pointer travels to it
@@ -285,6 +287,7 @@ Window {
 
     function dismiss() {
         if (busy) return
+        if (wheelMode && !menuMode) { wheelMode = false; return }
         if (!daemon) { Qt.quit(); return }
         open = false; visible = false
         files = []; status = ""; menuOf = -1; hovered = -1
@@ -438,9 +441,15 @@ if (name === "trim") trimStart.input.forceActiveFocus()
             Text { anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: 34
                    text: win.t("File conversion without the fuss"); color: "#aeb3bd"; font.pixelSize: 14 }
             AppButton {
+                id: settingsButton
                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                 label: "⚙  " + win.t("Settings"); compact: true
                 onTriggered: win.openOverlay("settings")
+            }
+            AppButton {
+                anchors.right: settingsButton.left; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                label: "◉  " + win.t("Quick wheel"); compact: true
+                onTriggered: { win.overlay = ""; win.wheelMode = true; win.open = true }
             }
         }
 
