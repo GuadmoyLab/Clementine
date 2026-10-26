@@ -97,6 +97,8 @@ cargo run --release -- /path/to/file.png
 
 Use the regular workspace explicitly with `clementine --app`; use the fast radial menu with `clementine --menu`. The workspace also has a **Quick wheel** button, which keeps the selected files and returns to the workspace with Esc.
 
+The installer also starts a hidden `clementine --daemon` at login. Context-menu actions and global shortcuts send it a local request, so the wheel opens without starting Qt again.
+
 ## Using it
 
 1. Point at a file (see [Platform support](#platform-support) for how the menu starts on your system).
