@@ -10,9 +10,10 @@ bin=$PREFIX/bin/clementine
 desktop=$PREFIX/share/applications/clementine.desktop
 icon=$PREFIX/share/icons/hicolor/scalable/apps/clementine.svg
 kde_menu=${XDG_DATA_HOME:-$HOME/.local/share}/kio/servicemenus/clementine.desktop
+autostart=${XDG_CONFIG_HOME:-$HOME/.config}/autostart/clementine-wheel.desktop
 
 if [ "$1" = "--uninstall" ]; then
-    rm -f "$bin" "$desktop" "$icon"
+    rm -f "$bin" "$desktop" "$icon" "$autostart"
     # the KDE integration is per-user and only installed for PREFIX=~/.local
     if [ "$PREFIX" = "$HOME/.local" ] && command -v kpackagetool6 >/dev/null 2>&1; then
         rm -f "$kde_menu"
@@ -47,6 +48,18 @@ Exec=$bin --menu
 X-KDE-Shortcuts=Meta+Shift+C
 DESK
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$(dirname "$desktop")" 2>/dev/null || true
+
+# Keep Qt and QML warm: context actions and global hotkeys then only send a local request.
+mkdir -p "$(dirname "$autostart")"
+cat > "$autostart" <<DESK
+[Desktop Entry]
+Type=Application
+Name=Clementine quick wheel
+Exec=$bin --daemon
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+DESK
+"$bin" --daemon >/dev/null 2>&1 &
 
 case "$XDG_CURRENT_DESKTOP" in
     *KDE*) [ "$PREFIX" = "$HOME/.local" ] && integration/kde/install.sh "$bin" ;;
